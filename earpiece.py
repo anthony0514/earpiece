@@ -108,8 +108,8 @@ FRAME_MS      = 30                        # WebRTC VAD 프레임 단위
 FRAME_SAMPLES = RATE * FRAME_MS // 1000  # 480 samples
 FRAME_BYTES   = FRAME_SAMPLES * 2        # int16 = 2 bytes
 
-PREROLL_FRAMES  = 10   # 발화 시작 전 패딩 (~300ms)
-SILENCE_FRAMES  = 20   # 이 프레임 수 이상 무음이면 전사 (~600ms)
+PREROLL_FRAMES  = 6    # 발화 시작 전 패딩 (~180ms)
+SILENCE_FRAMES  = 8    # 이 프레임 수 이상 무음이면 전사 (~240ms)
 MIN_SPEECH_FRAMES = 5  # 이 이하는 노이즈로 무시
 
 
@@ -419,6 +419,7 @@ class OverlayWindow:
 
 # ── 메인 루프 ─────────────────────────────────────────────────────────────────
 def run(device_id: Optional[int], model_key: str, ctx: dict,
+        translate: bool = True,
         overlay: Optional["OverlayWindow"] = None):
     dev_name = sd.query_devices(device_id)["name"] if device_id is not None else "기본 마이크"
 
@@ -435,23 +436,25 @@ def run(device_id: Optional[int], model_key: str, ctx: dict,
     whisper = WhisperBackend(model_key)
     print(f"{C.GRAY}모델   : {whisper.label}{C.RESET}")
 
-    print(f"{C.YELLOW}번역 모델 로딩 중... (argostranslate EN→KO){C.RESET}")
     import logging, os
-    logging.getLogger("stanza").setLevel(logging.ERROR)
-    # stanza가 OS 레벨 fd=2에 직접 쓰므로 dup2로 억제
-    _null_fd = os.open(os.devnull, os.O_WRONLY)
-    _saved_stderr = os.dup(2)
-    os.dup2(_null_fd, 2)
-    os.close(_null_fd)
-    try:
-        translator = load_translator()
-        if translator:
-            translator.translate("warming up")
-    finally:
-        os.dup2(_saved_stderr, 2)
-        os.close(_saved_stderr)
+    translator = None
+    if translate:
+        print(f"{C.YELLOW}번역 모델 로딩 중... (argostranslate EN→KO){C.RESET}")
+        logging.getLogger("stanza").setLevel(logging.ERROR)
+        # stanza가 OS 레벨 fd=2에 직접 쓰므로 dup2로 억제
+        _null_fd = os.open(os.devnull, os.O_WRONLY)
+        _saved_stderr = os.dup(2)
+        os.dup2(_null_fd, 2)
+        os.close(_null_fd)
+        try:
+            translator = load_translator()
+            if translator:
+                translator.translate("warming up")
+        finally:
+            os.dup2(_saved_stderr, 2)
+            os.close(_saved_stderr)
     has_translator = translator is not None
-    print(f"{C.GRAY}번역   : {'✅ argostranslate EN→KO (로컬)' if has_translator else '⏭  OFF'}{C.RESET}")
+    print(f"{C.GRAY}번역   : {'✅ argostranslate EN→KO (로컬)' if has_translator else '⏭  OFF (--no-translate)'}{C.RESET}")
     gui_mode = overlay is not None
     print(f"{C.GRAY}GUI    : {'✅ 자막 오버레이' if gui_mode else '⏭  터미널 모드'}{C.RESET}")
     print(f"{C.GREEN}✅ 준비 완료 — 말하세요 (Ctrl+C로 종료){C.RESET}\n")
@@ -547,6 +550,8 @@ def main():
                         help="오디오 장치 목록 출력")
     parser.add_argument("--gui", action="store_true",
                         help="화면 하단 자막 오버레이 모드")
+    parser.add_argument("--no-translate", action="store_true",
+                        help="번역 OFF — STT 결과만 표시")
     args = parser.parse_args()
 
     if args.list_devices:
@@ -571,9 +576,10 @@ def main():
             sys.exit(1)
         overlay = OverlayWindow()
         # 파이프라인은 백그라운드 스레드, tkinter 루프는 메인 스레드
-        overlay.start(lambda: run(device_id, args.model, ctx, overlay=overlay))
+        overlay.start(lambda: run(device_id, args.model, ctx,
+                                  translate=not args.no_translate, overlay=overlay))
     else:
-        run(device_id, args.model, ctx)
+        run(device_id, args.model, ctx, translate=not args.no_translate)
 
 
 if __name__ == "__main__":

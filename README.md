@@ -51,6 +51,12 @@ python earpiece.py --list-devices
 # BlackHole로 Zoom 캡처 (Mac)
 python earpiece.py --device blackhole
 
+# 자막 오버레이 GUI
+python earpiece.py --device blackhole --gui
+
+# 번역 OFF (STT만, 더 빠름)
+python earpiece.py --device blackhole --no-translate
+
 # 미팅 컨텍스트(키워드) 포함
 python earpiece.py --device blackhole --context contexts/example.md
 
@@ -97,6 +103,5 @@ Keywords 섹션에 등록한 고유명사/약어가 Whisper 전사 정확도를 
 
 ## 다음 단계
 
-- [ ] 자막 오버레이 UI (맥 화면 하단)
 - [ ] 미팅 후 요약 자동 생성
 - [ ] Obsidian vault에 트랜스크립트 자동 저장
