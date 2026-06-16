@@ -54,14 +54,27 @@ PYTHON=$(command -v python3 || command -v python || true)
 PY_VER=$($PYTHON --version 2>&1)
 ok "Python: $PY_VER"
 
-# ── 시스템 패키지 (Linux) ────────────────────────────────────────────────────
+# ── 시스템 패키지 ────────────────────────────────────────────────────────────
+if [ "$OS" = "Darwin" ]; then
+  # tkinter: brew python-tk 버전이 Python 버전과 일치해야 함
+  if ! $PYTHON -c "import tkinter" &>/dev/null 2>&1; then
+    if command -v brew &>/dev/null; then
+      PY_MINOR=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+      info "tkinter 설치 중... (brew install python-tk@${PY_MINOR})"
+      brew install "python-tk@${PY_MINOR}" || warn "python-tk 설치 실패 — --gui 옵션 사용 불가"
+    else
+      warn "tkinter 없음 + brew 없음 — --gui 사용 시 https://brew.sh 설치 후 재시도"
+    fi
+  fi
+fi
+
 if [ "$OS" = "Linux" ]; then
   if command -v apt-get &>/dev/null; then
-    info "PortAudio 설치 중..."
-    sudo apt-get install -y --no-install-recommends portaudio19-dev libsndfile1 -q
-    ok "PortAudio 설치됨"
+    info "시스템 패키지 설치 중... (portaudio, tkinter)"
+    sudo apt-get install -y --no-install-recommends portaudio19-dev libsndfile1 python3-tk -q
+    ok "시스템 패키지 설치됨"
   else
-    warn "apt-get 없음 — portaudio19-dev 를 수동으로 설치하세요"
+    warn "apt-get 없음 — portaudio19-dev, python3-tk 를 수동으로 설치하세요"
   fi
 fi
 
