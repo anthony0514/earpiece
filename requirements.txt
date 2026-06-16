@@ -1,0 +1,5 @@
+sounddevice
+numpy
+webrtcvad-wheels
+mlx-whisper
+argostranslate
