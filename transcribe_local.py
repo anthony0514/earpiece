@@ -172,33 +172,18 @@ MODELS = {
 
 # ── 로컬 번역 (argostranslate EN→KO) ─────────────────────────────────────────
 def load_translator():
-    """argostranslate EN→KO 패키지 설치. 첫 실행 시 ~100MB 다운로드."""
+    """argostranslate EN→KO 번역기 로드. 미설치 시 None 반환."""
     try:
-        from argostranslate import package, translate
-
-        def _get_translation(langs):
-            en = next((l for l in langs if l.code == "en"), None)
-            ko = next((l for l in langs if l.code == "ko"), None)
-            if en and ko:
-                return en.get_translation(ko)
-            return None
-
-        # 이미 설치된 경우 바로 반환
-        trans = _get_translation(translate.get_installed_languages())
-        if trans:
-            return trans
-
-        # 패키지 인덱스 업데이트 & en→ko 설치
-        print(f"{C.GRAY}  번역 패키지 다운로드 중... (~100MB){C.RESET}")
-        package.update_package_index()
-        available = package.get_available_packages()
-        pkg = next((p for p in available if p.from_code == "en" and p.to_code == "ko"), None)
-        if pkg is None:
-            raise RuntimeError("en→ko 패키지를 찾을 수 없습니다")
-        package.install_from_path(pkg.download())
-
-        return _get_translation(translate.get_installed_languages())
-
+        from argostranslate import translate
+        installed = translate.get_installed_languages()
+        en = next((l for l in installed if l.code == "en"), None)
+        ko = next((l for l in installed if l.code == "ko"), None)
+        if en and ko:
+            trans = en.get_translation(ko)
+            if trans:
+                return trans
+        print(f"{C.YELLOW}⚠  번역 패키지 미설치 — setup_mac.sh 를 먼저 실행하세요{C.RESET}")
+        return None
     except Exception as e:
         print(f"{C.YELLOW}⚠  번역 로드 실패: {e}{C.RESET}")
         return None
@@ -251,10 +236,15 @@ def run(device_id: Optional[int], model_key: str, ctx: dict):
     if ctx["keywords"]:
         print(f"{C.GRAY}키워드 : {', '.join(ctx['keywords'][:8])}{C.RESET}")
     print(f"{C.CYAN}{'─'*60}{C.RESET}")
-    print(f"{C.YELLOW}모델 로딩 중... (첫 실행 시 다운로드){C.RESET}")
+    print(f"{C.YELLOW}Whisper 모델 확인 중...{C.RESET}")
 
-    dummy = np.zeros(RATE, dtype=np.float32)
-    mlx_whisper.transcribe(dummy, path_or_hf_repo=model_id, verbose=False)
+    # 모델 캐시 확인 (다운로드 없이)
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(model_id, local_files_only=True)
+    except Exception:
+        print(f"{C.RED}❌ Whisper 모델 미설치 — setup_mac.sh 를 먼저 실행하세요{C.RESET}")
+        sys.exit(1)
 
     print(f"{C.YELLOW}번역 모델 로딩 중... (argostranslate EN→KO){C.RESET}")
     import logging, io, contextlib, os
