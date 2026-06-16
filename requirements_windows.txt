@@ -1,5 +1,0 @@
-sounddevice
-numpy
-webrtcvad-wheels
-faster-whisper
-argostranslate

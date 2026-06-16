@@ -2,21 +2,23 @@
 """
 Neural D — Local Meeting Transcriber
 =====================================
-BlackHole → WebRTC VAD → mlx-whisper (완전 오프라인)
+오디오 입력 → WebRTC VAD → Whisper STT (로컬) → argostranslate EN→KO
 
-Setup:
-  pip install sounddevice webrtcvad-wheels mlx-whisper numpy
+Platform:
+  Mac  (Apple Silicon) : mlx-whisper   — setup_mac.sh
+  Linux / Docker       : faster-whisper — setup_linux.sh / Dockerfile
 
 Usage:
   python transcribe_local.py                         # 기본 마이크
-  python transcribe_local.py --device blackhole      # Zoom/Meet 오디오
+  python transcribe_local.py --device blackhole      # Zoom/Meet 오디오 (Mac)
+  python transcribe_local.py --device 0              # 장치 ID 직접 지정
   python transcribe_local.py --list-devices
   python transcribe_local.py --meeting template_meeting.md --device blackhole
   python transcribe_local.py --model base            # 정확도↑ (기본: tiny)
-  python transcribe_local.py --lang ko               # 한국어
 """
 
 import sys
+import platform
 import queue
 import argparse
 import collections
@@ -38,10 +40,8 @@ try:
 except ImportError:
     print("❌ pip install webrtcvad-wheels"); sys.exit(1)
 
-try:
-    import mlx_whisper
-except ImportError:
-    print("❌ pip install mlx-whisper"); sys.exit(1)
+# ── 플랫폼 감지 ───────────────────────────────────────────────────────────────
+IS_APPLE_SILICON = platform.system() == "Darwin" and platform.machine() == "arm64"
 
 
 # ── 컬러 ──────────────────────────────────────────────────────────────────────
@@ -161,13 +161,75 @@ class VADBuffer:
         return result
 
 
-# ── Whisper 모델 이름 매핑 ─────────────────────────────────────────────────────
-MODELS = {
+# ── Whisper 백엔드 추상화 ─────────────────────────────────────────────────────
+MLX_MODELS = {
     "tiny":   "mlx-community/whisper-tiny-mlx",
     "base":   "mlx-community/whisper-base-mlx",
     "small":  "mlx-community/whisper-small-mlx",
     "medium": "mlx-community/whisper-medium-mlx",
 }
+# faster-whisper는 모델 키 그대로 사용 (tiny / base / small / medium)
+
+SETUP_HINT = "setup_mac.sh" if IS_APPLE_SILICON else "setup_linux.sh (또는 Docker)"
+
+
+class WhisperBackend:
+    """플랫폼에 따라 mlx-whisper(Mac) 또는 faster-whisper(Linux) 사용."""
+
+    def __init__(self, model_key: str):
+        self.model_key = model_key
+
+        if IS_APPLE_SILICON:
+            self._init_mlx(model_key)
+        else:
+            self._init_faster(model_key)
+
+    def _init_mlx(self, model_key: str):
+        self.backend = "mlx"
+        self.mlx_model_id = MLX_MODELS.get(model_key, MLX_MODELS["tiny"])
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot_download(self.mlx_model_id, local_files_only=True)
+        except Exception:
+            print(f"{C.RED}❌ Whisper 모델 미설치 — {SETUP_HINT} 를 먼저 실행하세요{C.RESET}")
+            sys.exit(1)
+
+    def _init_faster(self, model_key: str):
+        self.backend = "faster"
+        try:
+            from faster_whisper import WhisperModel
+            self.model = WhisperModel(
+                model_key, device="cpu", compute_type="int8", local_files_only=True
+            )
+        except Exception:
+            print(f"{C.RED}❌ Whisper 모델 미설치 — {SETUP_HINT} 를 먼저 실행하세요{C.RESET}")
+            sys.exit(1)
+
+    @property
+    def label(self) -> str:
+        if self.backend == "mlx":
+            return f"mlx-whisper {self.model_key} ({self.mlx_model_id})"
+        return f"faster-whisper {self.model_key} (cpu int8)"
+
+    def transcribe(self, audio: np.ndarray, initial_prompt: Optional[str] = None) -> str:
+        if self.backend == "mlx":
+            import mlx_whisper
+            result = mlx_whisper.transcribe(
+                audio,
+                path_or_hf_repo=self.mlx_model_id,
+                language="en",
+                verbose=False,
+                initial_prompt=initial_prompt,
+            )
+            return result["text"].strip()
+        else:
+            segments, _ = self.model.transcribe(
+                audio,
+                language="en",
+                initial_prompt=initial_prompt,
+                beam_size=1,
+            )
+            return " ".join(s.text for s in segments).strip()
 
 
 # ── 로컬 번역 (argostranslate EN→KO) ─────────────────────────────────────────
@@ -182,7 +244,7 @@ def load_translator():
             trans = en.get_translation(ko)
             if trans:
                 return trans
-        print(f"{C.YELLOW}⚠  번역 패키지 미설치 — setup_mac.sh 를 먼저 실행하세요{C.RESET}")
+        print(f"{C.YELLOW}⚠  번역 패키지 미설치 — {SETUP_HINT} 를 먼저 실행하세요{C.RESET}")
         return None
     except Exception as e:
         print(f"{C.YELLOW}⚠  번역 로드 실패: {e}{C.RESET}")
@@ -224,27 +286,20 @@ class TranscriptLog:
 
 # ── 메인 루프 ─────────────────────────────────────────────────────────────────
 def run(device_id: Optional[int], model_key: str, ctx: dict):
-    model_id = MODELS.get(model_key, MODELS["tiny"])
     dev_name = sd.query_devices(device_id)["name"] if device_id is not None else "기본 마이크"
 
     print(f"\n{C.CYAN}{'─'*60}{C.RESET}")
     print(f"{C.BOLD}🎙  Neural D — Local Transcriber{C.RESET}")
     print(f"{C.CYAN}{'─'*60}{C.RESET}")
-    print(f"{C.GRAY}모델   : {model_key} ({model_id}){C.RESET}")
     print(f"{C.GRAY}장치   : {dev_name}{C.RESET}")
     print(f"{C.GRAY}언어   : en (고정){C.RESET}")
     if ctx["keywords"]:
         print(f"{C.GRAY}키워드 : {', '.join(ctx['keywords'][:8])}{C.RESET}")
     print(f"{C.CYAN}{'─'*60}{C.RESET}")
-    print(f"{C.YELLOW}Whisper 모델 확인 중...{C.RESET}")
+    print(f"{C.YELLOW}Whisper 모델 로딩 중...{C.RESET}")
 
-    # 모델 캐시 확인 (다운로드 없이)
-    try:
-        from huggingface_hub import snapshot_download
-        snapshot_download(model_id, local_files_only=True)
-    except Exception:
-        print(f"{C.RED}❌ Whisper 모델 미설치 — setup_mac.sh 를 먼저 실행하세요{C.RESET}")
-        sys.exit(1)
+    whisper = WhisperBackend(model_key)
+    print(f"{C.GRAY}모델   : {whisper.label}{C.RESET}")
 
     print(f"{C.YELLOW}번역 모델 로딩 중... (argostranslate EN→KO){C.RESET}")
     import logging, io, contextlib, os
@@ -275,27 +330,20 @@ def run(device_id: Optional[int], model_key: str, ctx: dict):
         pcm = (indata[:, 0] * 32767).astype(np.int16).tobytes()
         audio_q.put(pcm)
 
+    prompt = ", ".join(ctx["keywords"]) if ctx["keywords"] else None
+
     def transcribe_worker():
         while True:
             audio = transcribe_q.get()
             if audio is None:
                 break
             sys.stdout.write("\r" + " " * 70 + "\r")
-            result = mlx_whisper.transcribe(
-                audio,
-                path_or_hf_repo=model_id,
-                language="en",
-                verbose=False,
-                initial_prompt=", ".join(ctx["keywords"]) if ctx["keywords"] else None,
-            )
-            text = result["text"].strip()
+            text = whisper.transcribe(audio, initial_prompt=prompt)
             if not text:
                 continue
             ts = datetime.now().strftime("%H:%M:%S")
-            # 영어 즉시 출력
             print(f"{C.GRAY}[{ts}]{C.RESET} {C.GREEN}{C.BOLD}{text}{C.RESET}")
             log.add(text)
-            # 번역 큐에 넘기기
             if has_translator:
                 translate_q.put((text, ts))
 
