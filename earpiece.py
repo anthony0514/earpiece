@@ -398,7 +398,7 @@ def main():
     parser.add_argument("--device", "-d", default=None,
                         help="장치 ID 또는 'blackhole'")
     parser.add_argument("--model", "-m", default="tiny",
-                        choices=list(MODELS.keys()),
+                        choices=list(MLX_MODELS.keys()),
                         help="Whisper 모델 크기 (기본: tiny)")
     parser.add_argument("--context", default=None,
                         help="미팅 컨텍스트 .md 파일 경로 (예: contexts/example.md)")
