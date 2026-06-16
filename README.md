@@ -1,4 +1,4 @@
-# Neural D Meeting Transcriber
+# Earpiece
 
 실시간 영어 STT + 한글 번역 — 완전 로컬, API 불필요
 
@@ -7,55 +7,28 @@
 ## 파일 구조
 
 ```
-transcribe_local.py     ← 메인 스크립트 (Mac/Linux 공통)
-debug_audio.py          ← 오디오 입력 레벨 디버거
-template_meeting.md     ← 미팅별 복사해서 편집
-
-setup_mac.sh            ← Mac (Apple Silicon) 초기 설치
-setup_linux.sh          ← Linux bare metal 초기 설치
-Dockerfile              ← Docker 이미지 빌드
-
-requirements.txt        ← 공통 의존성
-requirements_mac.txt    ← Mac 전용 (mlx-whisper)
-requirements_linux.txt  ← Linux 전용 (faster-whisper)
+earpiece.py          ← 메인 스크립트
+initialize.sh        ← 최초 환경 세팅 (OS/CPU/CUDA 자동 감지)
+contexts/
+  example.md         ← 미팅 컨텍스트 템플릿
+README.md
 ```
 
 ---
 
-## 플랫폼별 설치
-
-### Mac (Apple Silicon)
+## 설치
 
 ```bash
-bash setup_mac.sh
+bash initialize.sh
 ```
 
-- 가상환경 생성 (`.venv`)
-- mlx-whisper + argostranslate EN→KO 모델 사전 다운로드
+OS, CPU 아키텍처, CUDA 유무를 자동으로 감지하여 적합한 백엔드를 설치합니다.
 
-### Linux (bare metal)
-
-```bash
-bash setup_linux.sh
-```
-
-- PortAudio, Python 패키지 설치
-- faster-whisper + argostranslate EN→KO 모델 사전 다운로드
-
-### Docker
-
-```bash
-docker build -t neural-d .
-
-# 마이크 입력
-docker run --rm -it --device /dev/snd neural-d
-
-# PulseAudio 시스템 오디오 캡처
-docker run --rm -it \
-  -e PULSE_SERVER=unix:/run/user/1000/pulse/native \
-  -v /run/user/1000/pulse:/run/user/1000/pulse \
-  neural-d --device 0
-```
+| 환경 | STT 백엔드 |
+|------|-----------|
+| Mac Apple Silicon | mlx-whisper (Metal 가속) |
+| Linux CPU | faster-whisper (int8) |
+| Linux CUDA | faster-whisper (float16, GPU) |
 
 ---
 
@@ -70,59 +43,60 @@ docker run --rm -it \
 ## 실행
 
 ```bash
-source .venv/bin/activate   # Linux: 동일
+source .venv/bin/activate
 
 # 오디오 장치 확인
-python transcribe_local.py --list-devices
+python earpiece.py --list-devices
 
 # BlackHole로 Zoom 캡처 (Mac)
-python transcribe_local.py --device blackhole
+python earpiece.py --device blackhole
 
 # 미팅 컨텍스트(키워드) 포함
-python transcribe_local.py --device blackhole --meeting template_meeting.md
+python earpiece.py --device blackhole --context contexts/example.md
 
-# 정확도 높이기 (모델 크기 업)
-python transcribe_local.py --device blackhole --model base
+# 정확도 높이기
+python earpiece.py --device blackhole --model base
 ```
+
+---
+
+## 미팅 컨텍스트
+
+`contexts/example.md` 를 복사해서 미팅별로 작성합니다.
+
+```bash
+cp contexts/example.md contexts/2026-06-16_meeting.md
+# 참가자, 키워드, 아젠다 작성 후 실행 시 --context 로 지정
+```
+
+Keywords 섹션에 등록한 고유명사/약어가 Whisper 전사 정확도를 높이는 데 사용됩니다.
 
 ---
 
 ## 출력 예시
 
 ```
-[17:06:02] Can you walk us through the KEPCO deployment?
-          → KEPCO 배포 과정을 안내해 주시겠어요?
+[17:06:02] Can you walk us through the deployment?
+          → 배포 과정을 안내해 주시겠어요?
 [17:06:05] Thank you.
           → 감사합니다.
 ```
 
 ---
 
-## 오디오 디버깅
-
-```bash
-python debug_audio.py --device blackhole   # Mac
-python debug_audio.py --device 0           # Linux/Docker
-```
-
-레벨 바가 움직이면 정상. 무음이면 Zoom 스피커 출력이 Multi-Output Device로 설정됐는지 확인.
-
----
-
 ## 모델 옵션
 
-| 모델 | 크기 | Mac (mlx) | Linux (faster) |
-|------|------|-----------|----------------|
-| tiny (기본) | 74MB | 매우 빠름 | 빠름 |
-| base | 142MB | 빠름 | 보통 |
-| small | 466MB | 보통 | 느림 |
-| medium | 1.5GB | 느림 | 매우 느림 |
+| 모델 | 크기 | 속도 |
+|------|------|------|
+| tiny (기본) | 74MB | 매우 빠름 |
+| base | 142MB | 빠름 |
+| small | 466MB | 보통 |
+| medium | 1.5GB | 느림 |
 
 ---
 
 ## 다음 단계
 
 - [ ] 자막 오버레이 UI (맥 화면 하단)
-- [ ] Zoom/Meet 오디오 자동 캡처 설정 자동화
 - [ ] 미팅 후 요약 자동 생성
 - [ ] Obsidian vault에 트랜스크립트 자동 저장

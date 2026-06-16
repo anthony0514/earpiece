@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-Neural D — Local Meeting Transcriber
+Earpiece — Local Meeting Transcriber
 =====================================
 오디오 입력 → WebRTC VAD → Whisper STT (로컬) → argostranslate EN→KO
 
 Platform:
-  Mac  (Apple Silicon) : mlx-whisper   — setup_mac.sh
-  Linux / Docker       : faster-whisper — setup_linux.sh / Dockerfile
+  Mac  (Apple Silicon) : mlx-whisper
+  Linux                : faster-whisper (CPU / CUDA 자동)
+
+Run initialize.sh first to set up the environment.
 
 Usage:
-  python transcribe_local.py                         # 기본 마이크
-  python transcribe_local.py --device blackhole      # Zoom/Meet 오디오 (Mac)
-  python transcribe_local.py --device 0              # 장치 ID 직접 지정
-  python transcribe_local.py --list-devices
-  python transcribe_local.py --meeting template_meeting.md --device blackhole
-  python transcribe_local.py --model base            # 정확도↑ (기본: tiny)
+  python earpiece.py                                      # 기본 마이크
+  python earpiece.py --device blackhole                   # Zoom/Meet 오디오 (Mac)
+  python earpiece.py --device 0                           # 장치 ID 직접 지정
+  python earpiece.py --list-devices
+  python earpiece.py --context contexts/example.md --device blackhole
+  python earpiece.py --model base                         # 정확도↑ (기본: tiny)
 """
 
 import sys
@@ -289,7 +291,7 @@ def run(device_id: Optional[int], model_key: str, ctx: dict):
     dev_name = sd.query_devices(device_id)["name"] if device_id is not None else "기본 마이크"
 
     print(f"\n{C.CYAN}{'─'*60}{C.RESET}")
-    print(f"{C.BOLD}🎙  Neural D — Local Transcriber{C.RESET}")
+    print(f"{C.BOLD}🎙  Earpiece — Local Transcriber{C.RESET}")
     print(f"{C.CYAN}{'─'*60}{C.RESET}")
     print(f"{C.GRAY}장치   : {dev_name}{C.RESET}")
     print(f"{C.GRAY}언어   : en (고정){C.RESET}")
@@ -392,14 +394,14 @@ def run(device_id: Optional[int], model_key: str, ctx: dict):
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description="Neural D Local Transcriber")
+    parser = argparse.ArgumentParser(description="Earpiece Local Transcriber")
     parser.add_argument("--device", "-d", default=None,
                         help="장치 ID 또는 'blackhole'")
     parser.add_argument("--model", "-m", default="tiny",
                         choices=list(MODELS.keys()),
                         help="Whisper 모델 크기 (기본: tiny)")
-    parser.add_argument("--meeting", default=None,
-                        help="미팅 컨텍스트 .md 파일 경로")
+    parser.add_argument("--context", default=None,
+                        help="미팅 컨텍스트 .md 파일 경로 (예: contexts/example.md)")
     parser.add_argument("--list-devices", action="store_true",
                         help="오디오 장치 목록 출력")
     args = parser.parse_args()
@@ -409,12 +411,12 @@ def main():
         return
 
     ctx = {"keywords": [], "context": ""}
-    if args.meeting:
-        if not Path(args.meeting).exists():
-            print(f"{C.RED}❌ 파일 없음: {args.meeting}{C.RESET}")
+    if args.context:
+        if not Path(args.context).exists():
+            print(f"{C.RED}❌ 파일 없음: {args.context}{C.RESET}")
             sys.exit(1)
-        ctx = parse_meeting_md(args.meeting)
-        print(f"{C.GREEN}✅ 미팅 컨텍스트: 키워드 {len(ctx['keywords'])}개{C.RESET}")
+        ctx = parse_meeting_md(args.context)
+        print(f"{C.GREEN}✅ 컨텍스트 로드: 키워드 {len(ctx['keywords'])}개{C.RESET}")
 
     device_id = resolve_device(args.device)
     run(device_id, args.model, ctx)

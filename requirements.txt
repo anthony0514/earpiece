@@ -1,4 +1,0 @@
-sounddevice
-numpy
-webrtcvad-wheels
-argostranslate
