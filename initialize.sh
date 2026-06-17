@@ -48,23 +48,48 @@ else
 fi
 echo ""
 
-# ── Python 확인 ───────────────────────────────────────────────────────────────
+# ── Python 확인 / 설치 ────────────────────────────────────────────────────────
 PYTHON=$(command -v python3 || command -v python || true)
-if [ -z "$PYTHON" ] || ! $PYTHON -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" &>/dev/null; then
-  PY_VER=${PYTHON:+$($PYTHON --version 2>&1)}
+
+_need_python() {
+  [ -z "$PYTHON" ] && return 0
+  $PYTHON -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" &>/dev/null && return 1
+  return 0
+}
+
+if _need_python; then
+  PY_VER=${PYTHON:+$($PYTHON --version 2>&1 || true)}
   [ -n "$PY_VER" ] && info "Python 버전 낮음: $PY_VER"
-  if [ "$OS" = "Darwin" ] && command -v brew &>/dev/null; then
+
+  if [ "$OS" = "Darwin" ]; then
+    if ! command -v brew &>/dev/null; then
+      die "Homebrew 가 없습니다. https://brew.sh 에서 먼저 설치하세요."
+    fi
     info "Python 3.11 설치 중... (brew install python@3.11)"
-    brew install python@3.11 -q
+    brew install python@3.11 || die "Python 3.11 설치 실패 — brew install python@3.11 을 직접 실행해 보세요."
     PYTHON=$(brew --prefix python@3.11)/bin/python3.11
-  elif [ "$OS" = "Linux" ] && command -v apt-get &>/dev/null; then
-    info "Python 3.11 설치 중... (apt-get)"
-    sudo apt-get install -y python3.11 python3.11-venv -q
-    PYTHON=$(command -v python3.11)
+    [ -x "$PYTHON" ] || die "Python 3.11 바이너리를 찾을 수 없습니다: $PYTHON"
+
+  elif [ "$OS" = "Linux" ]; then
+    if command -v apt-get &>/dev/null; then
+      info "Python 3.11 설치 중... (apt-get)"
+      sudo apt-get update -q || die "apt-get update 실패"
+      sudo apt-get install -y python3.11 python3.11-venv -q || die "Python 3.11 설치 실패"
+      PYTHON=$(command -v python3.11 || true)
+      [ -z "$PYTHON" ] && die "Python 3.11 설치 후에도 바이너리를 찾을 수 없습니다."
+    else
+      die "apt-get 없음 — Python 3.10+ 를 수동으로 설치하세요: https://python.org"
+    fi
+
   else
-    die "Python 3.10+ 이 필요합니다. https://python.org"
+    die "지원하지 않는 OS입니다. Python 3.10+ 를 수동으로 설치하세요: https://python.org"
   fi
+
+  # 설치 후 재검증
+  $PYTHON -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" &>/dev/null \
+    || die "Python 3.10+ 설치 후에도 버전이 맞지 않습니다: $($PYTHON --version 2>&1)"
 fi
+
 PY_VER=$($PYTHON --version 2>&1)
 ok "Python: $PY_VER"
 
@@ -85,7 +110,8 @@ fi
 if [ "$OS" = "Linux" ]; then
   if command -v apt-get &>/dev/null; then
     info "시스템 패키지 설치 중... (portaudio, tkinter)"
-    sudo apt-get install -y --no-install-recommends portaudio19-dev libsndfile1 python3-tk -q
+    sudo apt-get install -y --no-install-recommends portaudio19-dev libsndfile1 python3-tk -q \
+      || warn "시스템 패키지 일부 설치 실패 — 오디오/GUI 기능이 동작하지 않을 수 있습니다."
     ok "시스템 패키지 설치됨"
   else
     warn "apt-get 없음 — portaudio19-dev, python3-tk 를 수동으로 설치하세요"
@@ -95,26 +121,27 @@ fi
 # ── 가상환경 ──────────────────────────────────────────────────────────────────
 if [ ! -d ".venv" ]; then
   info "가상환경 생성 중..."
-  $PYTHON -m venv .venv
+  $PYTHON -m venv .venv || die "가상환경 생성 실패 — python3-venv 가 설치되어 있는지 확인하세요."
 fi
-source .venv/bin/activate
+source .venv/bin/activate || die "가상환경 활성화 실패"
 ok "가상환경 활성화"
 
 # ── Python 패키지 설치 ────────────────────────────────────────────────────────
 info "공통 패키지 설치 중..."
-pip install -q --upgrade pip
-pip install -q sounddevice numpy webrtcvad-wheels argostranslate
+pip install -q --upgrade pip || warn "pip 업그레이드 실패 — 계속 진행합니다."
+pip install -q sounddevice numpy webrtcvad-wheels argostranslate \
+  || die "공통 패키지 설치 실패 — 네트워크 연결을 확인하세요."
 
 if [ "$BACKEND" = "mlx" ]; then
   info "mlx-whisper 설치 중... (Apple Silicon)"
-  pip install -q mlx-whisper
+  pip install -q mlx-whisper || die "mlx-whisper 설치 실패"
 else
   info "faster-whisper 설치 중..."
-  pip install -q faster-whisper
-  # CUDA 버전이면 GPU 지원 torch 설치
+  pip install -q faster-whisper || die "faster-whisper 설치 실패"
   if [ "$HAS_CUDA" = true ]; then
     info "CUDA 지원 패키지 설치 중..."
-    pip install -q torch --index-url https://download.pytorch.org/whl/cu121
+    pip install -q torch --index-url https://download.pytorch.org/whl/cu121 \
+      || warn "CUDA torch 설치 실패 — CPU 모드로 동작합니다."
   fi
 fi
 ok "패키지 설치 완료"
@@ -129,7 +156,7 @@ try:
                            path_or_hf_repo="mlx-community/whisper-tiny-mlx", verbose=False)
     print("✅ Whisper 모델 준비 완료 (mlx)")
 except Exception as e:
-    print(f"❌ {e}"); sys.exit(1)
+    print(f"❌ Whisper 모델 다운로드 실패: {e}"); sys.exit(1)
 EOF
 else
   python - <<EOF
@@ -139,7 +166,7 @@ try:
     WhisperModel("tiny", device="${DEVICE_FLAG}", compute_type="${COMPUTE_TYPE}")
     print("✅ Whisper 모델 준비 완료 (faster-whisper, ${DEVICE_FLAG})")
 except Exception as e:
-    print(f"❌ {e}"); sys.exit(1)
+    print(f"❌ Whisper 모델 다운로드 실패: {e}"); sys.exit(1)
 EOF
 fi
 
@@ -147,22 +174,28 @@ fi
 info "번역 패키지 다운로드 중... (EN→KO, ~100MB)"
 python - <<'EOF'
 import sys
-from argostranslate import package, translate
+try:
+    from argostranslate import package, translate
+except ImportError as e:
+    print(f"❌ argostranslate import 실패: {e}"); sys.exit(1)
 
-installed = translate.get_installed_languages()
-en = next((l for l in installed if l.code == "en"), None)
-ko = next((l for l in installed if l.code == "ko"), None)
-if en and ko and en.get_translation(ko):
-    print("✅ 번역 패키지 이미 설치됨")
-    sys.exit(0)
+try:
+    installed = translate.get_installed_languages()
+    en = next((l for l in installed if l.code == "en"), None)
+    ko = next((l for l in installed if l.code == "ko"), None)
+    if en and ko and en.get_translation(ko):
+        print("✅ 번역 패키지 이미 설치됨")
+        sys.exit(0)
 
-package.update_package_index()
-available = package.get_available_packages()
-pkg = next((p for p in available if p.from_code == "en" and p.to_code == "ko"), None)
-if not pkg:
-    print("❌ EN→KO 패키지를 찾을 수 없습니다"); sys.exit(1)
-package.install_from_path(pkg.download())
-print("✅ 번역 패키지 설치 완료")
+    package.update_package_index()
+    available = package.get_available_packages()
+    pkg = next((p for p in available if p.from_code == "en" and p.to_code == "ko"), None)
+    if not pkg:
+        print("❌ EN→KO 패키지를 찾을 수 없습니다 — 네트워크 연결을 확인하세요."); sys.exit(1)
+    package.install_from_path(pkg.download())
+    print("✅ 번역 패키지 설치 완료")
+except Exception as e:
+    print(f"❌ 번역 패키지 설치 실패: {e}"); sys.exit(1)
 EOF
 
 # ── 완료 ──────────────────────────────────────────────────────────────────────
