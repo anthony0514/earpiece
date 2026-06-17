@@ -50,10 +50,22 @@ echo ""
 
 # ── Python 확인 ───────────────────────────────────────────────────────────────
 PYTHON=$(command -v python3 || command -v python || true)
-[ -z "$PYTHON" ] && die "Python 3.10+ 이 필요합니다. https://python.org"
+if [ -z "$PYTHON" ] || ! $PYTHON -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" &>/dev/null; then
+  PY_VER=${PYTHON:+$($PYTHON --version 2>&1)}
+  [ -n "$PY_VER" ] && info "Python 버전 낮음: $PY_VER"
+  if [ "$OS" = "Darwin" ] && command -v brew &>/dev/null; then
+    info "Python 3.11 설치 중... (brew install python@3.11)"
+    brew install python@3.11 -q
+    PYTHON=$(brew --prefix python@3.11)/bin/python3.11
+  elif [ "$OS" = "Linux" ] && command -v apt-get &>/dev/null; then
+    info "Python 3.11 설치 중... (apt-get)"
+    sudo apt-get install -y python3.11 python3.11-venv -q
+    PYTHON=$(command -v python3.11)
+  else
+    die "Python 3.10+ 이 필요합니다. https://python.org"
+  fi
+fi
 PY_VER=$($PYTHON --version 2>&1)
-PY_OK=$($PYTHON -c "import sys; print(1 if sys.version_info >= (3,10) else 0)")
-[ "$PY_OK" != "1" ] && warn "Python 3.10+ 권장. 현재: $PY_VER — 패키지 설치 실패 시 업그레이드 필요"
 ok "Python: $PY_VER"
 
 # ── 시스템 패키지 ────────────────────────────────────────────────────────────
