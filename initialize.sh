@@ -52,6 +52,8 @@ echo ""
 PYTHON=$(command -v python3 || command -v python || true)
 [ -z "$PYTHON" ] && die "Python 3.9+ 이 필요합니다. https://python.org"
 PY_VER=$($PYTHON --version 2>&1)
+PY_OK=$($PYTHON -c "import sys; print(1 if sys.version_info >= (3,9) else 0)")
+[ "$PY_OK" != "1" ] && die "Python 3.9+ 이 필요합니다. 현재: $PY_VER"
 ok "Python: $PY_VER"
 
 # ── 시스템 패키지 ────────────────────────────────────────────────────────────
