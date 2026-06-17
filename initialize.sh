@@ -53,7 +53,7 @@ PYTHON=$(command -v python3 || command -v python || true)
 [ -z "$PYTHON" ] && die "Python 3.10+ 이 필요합니다. https://python.org"
 PY_VER=$($PYTHON --version 2>&1)
 PY_OK=$($PYTHON -c "import sys; print(1 if sys.version_info >= (3,10) else 0)")
-[ "$PY_OK" != "1" ] && die "Python 3.10+ 이 필요합니다. 현재: $PY_VER"
+[ "$PY_OK" != "1" ] && warn "Python 3.10+ 권장. 현재: $PY_VER — 패키지 설치 실패 시 업그레이드 필요"
 ok "Python: $PY_VER"
 
 # ── 시스템 패키지 ────────────────────────────────────────────────────────────
